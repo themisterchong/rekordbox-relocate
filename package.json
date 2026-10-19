@@ -1,0 +1,10 @@
+{
+  "name": "rekordbox-relocate",
+  "version": "0.1.0",
+  "description": "Move a rekordbox / rbxport library to new music folders (e.g. Windows to Linux) by rewriting track paths in master.db. Keeps cues, grids, playlists and analysis.",
+  "type": "module",
+  "bin": { "rekordbox-relocate": "relocate.mjs" },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "dependencies": { "better-sqlite3-multiple-ciphers": "^13.0.3" }
+}
