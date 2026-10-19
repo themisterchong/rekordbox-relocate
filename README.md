@@ -31,7 +31,9 @@ npm install
 |---|---|
 | Windows | `%APPDATA%\Pioneer\rekordbox\master.db` |
 | macOS | `~/Library/Pioneer/rekordbox/master.db` |
-| Linux (rbxport) | wherever your rbxport library is |
+| Linux (rbxport) | `~/Library/Pioneer/rekordbox/master.db`, unless `~/.config/Pioneer/rekordbox6/rekordbox3.settings` names another `masterDbDirectory` |
+
+The key is the same standard one on every system, so a library copied from Windows opens as it is.
 
 ### 1. See where your music is
 
@@ -94,12 +96,15 @@ Only rows whose path starts with a `--from` folder, in these columns:
 - `djmdContent.FolderPath`, `OrgFolderPath`, `rb_LocalFolderPath` (where the track's file is)
 - `contentFile`, `imageFile`, `settingFile` `.rb_local_path` (analysis and artwork files in the share folder)
 - `djmdContent.FileNameL`, only when the real file's name differs in case or accents
+- `djmdContent.rb_file_id`: the file system's number for the file, which Auto Relocate uses to find moved files. The old computer's number means nothing on the new one, so it becomes the new file's number, or `0` when the file isn't found (what rekordbox stores for an unreadable file)
 
-Each changed row gets a new `rb_local_usn` and `updated_at`, the same way rekordbox marks its own edits.
+This is what rbxport's own Relocate writes for a single track. Each changed row also gets a new `rb_local_usn` (above the highest one in the library, as rbxport counts) and `updated_at`.
+
+rekordbox's own "drive substitution" (`BaseDBDrive` / `CurrentDBDrive`) only swaps a drive letter for a library on an external drive, and doesn't apply on Linux, where everything is under `/`. That's why a Windows library needs its paths rewritten.
 
 ## Tested
 
-- Round trip on a real 1,509-track rekordbox 7 library: macOS paths → Windows paths → back gives byte-identical paths; tracks, playlists and playlist entries unchanged.
+- Round trip on a real 1,509-track rekordbox 7 library: macOS paths → Windows paths → back gives byte-identical paths and the same `rb_file_id` rekordbox itself stored; tracks, playlists and playlist entries unchanged.
 - Case-sensitive filesystem: tracks stored as `House1.wav` are matched to `HOUSE1.WAV` on disk.
 - Windows → Linux on a real migration: not yet. Reports welcome.
 

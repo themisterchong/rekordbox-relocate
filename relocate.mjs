@@ -9,7 +9,7 @@
  * Safety: the input file is only read. Changes go to a new file (--out), which is
  * checked after writing and deleted again if any check fails.
  */
-import { existsSync, statSync, copyFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, statSync, lstatSync, copyFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { createRequire } from 'node:module'
 
@@ -18,6 +18,9 @@ const Database = require('better-sqlite3-multiple-ciphers')
 
 // Public key rekordbox 6/7 uses for master.db (same one pyrekordbox and rbxport use).
 const DEFAULT_KEY = '402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497'
+
+// Tables whose highest rb_local_usn the next change number must exceed, as rbxport's next_usn does.
+const USN_TABLES = ['djmdContent', 'djmdPlaylist', 'djmdSongPlaylist', 'djmdSongHotCueBanklist']
 
 // Columns that hold absolute file paths. Rows are only touched when they start with a --from folder.
 const PATH_COLUMNS = [
@@ -195,6 +198,12 @@ function overview(db, depth) {
       console.log('  Add a second --from/--to pair for it if that folder moves too.')
     }
   }
+  const drv = hasTable(db, 'djmdProperty') && hasColumn(db, 'djmdProperty', 'BaseDBDrive')
+    ? db.prepare('select BaseDBDrive b, CurrentDBDrive c from djmdProperty limit 1').get() : null
+  if (drv?.b && drv?.c && drv.b !== drv.c) {
+    console.log(`\nNote: this library has a drive substitution set (${drv.b} -> ${drv.c}); the app swaps that drive`)
+    console.log('  when reading paths. Use the paths as listed above for --from.')
+  }
   console.log('\nNext: run again with --from <old folder> --to <new folder> to see what would change.')
 }
 
@@ -204,6 +213,7 @@ function plan(db, pairs, check) {
   const missing = []
   let caseFixed = 0, checked = 0, liveMoved = 0
   const canCheck = check && pairs.every((p) => p.toWin === (process.platform === 'win32'))
+  const fileIdCol = hasColumn(db, 'djmdContent', 'rb_file_id')
   for (const [table, col] of PATH_COLUMNS) {
     if (!hasTable(db, table) || !hasColumn(db, table, col)) continue
     let n = 0
@@ -212,15 +222,23 @@ function plan(db, pairs, check) {
       let np = mapPath(r.p, pairs)
       if (np === null || np === r.p) continue
       const ch = { table, col, rowid: r.rid, oldPath: r.p, newPath: np }
-      if (table === 'djmdContent' && col === 'FolderPath' && !r.del) liveMoved++
-      if (table === 'djmdContent' && col === 'FolderPath' && canCheck && !r.del) {
+      const isTrackFile = table === 'djmdContent' && col === 'FolderPath'
+      // rb_file_id is the file system's number for the file (inode / NTFS index), which Auto Relocate
+      // uses to find moved files. The old machine's number means nothing here, so it is replaced with
+      // the new file's number, or 0 ("unknown", as rekordbox stores for an unreadable file).
+      if (isTrackFile && fileIdCol) ch.fileId = '0'
+      if (isTrackFile && !r.del) liveMoved++
+      if (isTrackFile && canCheck && !r.del) {
         checked++
         const real = resolveFile(np)
         if (!real) missing.push(np)
-        else if (real !== np) {
-          caseFixed++
-          ch.newPath = np = real
-          if (r.fn && basename(real) !== r.fn) ch.fileName = basename(real)
+        else {
+          if (real !== np) {
+            caseFixed++
+            ch.newPath = np = real
+            if (r.fn && basename(real) !== r.fn) ch.fileName = basename(real)
+          }
+          if (fileIdCol) ch.fileId = fileIdOf(real)
         }
       }
       changes.push(ch)
@@ -254,6 +272,11 @@ function report(db, p, pairs, check) {
   }
 }
 
+/** juce::File::getFileIdentifier as rekordbox stores it: the inode (NTFS file index on Windows) as signed 64-bit text. */
+function fileIdOf(path) {
+  try { return BigInt.asIntN(64, lstatSync(path, { bigint: true }).ino).toString() } catch { return '0' }
+}
+
 function nowStamp() {
   return new Date().toISOString().replace('T', ' ').replace('Z', ' +00:00')
 }
@@ -270,10 +293,16 @@ function write(opts, p) {
   const now = nowStamp()
   const apply = db.transaction(() => {
     let usn = db.prepare("select int_1 from agentRegistry where registry_id='localUpdateCount'").get()?.int_1 ?? null
+    if (usn !== null) {
+      for (const t of new Set([...USN_TABLES, ...p.changes.map((c) => c.table)])) {
+        if (hasTable(db, t) && hasColumn(db, t, 'rb_local_usn')) usn = Math.max(usn, db.prepare(`select coalesce(max(rb_local_usn),0) m from "${t}"`).get().m)
+      }
+    }
     const touched = new Map() // "table:rowid" -> true, so a row gets one new usn
     for (const c of p.changes) {
       db.prepare(`update "${c.table}" set "${c.col}"=? where rowid=?`).run(c.newPath, c.rowid)
       if (c.fileName) db.prepare('update djmdContent set FileNameL=? where rowid=?').run(c.fileName, c.rowid)
+      if (c.fileId !== undefined) db.prepare('update djmdContent set rb_file_id=? where rowid=?').run(c.fileId, c.rowid)
       const k = c.table + ':' + c.rowid
       if (touched.has(k)) continue
       touched.set(k, true)
