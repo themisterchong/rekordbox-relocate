@@ -108,6 +108,10 @@ rekordbox's own "drive substitution" (`BaseDBDrive` / `CurrentDBDrive`) only swa
 - Case-sensitive filesystem: tracks stored as `House1.wav` are matched to `HOUSE1.WAV` on disk.
 - Windows → Linux on a real migration: not yet. Reports welcome.
 
+## Credit
+
+Made by Mr. Chong ([themisterchong](https://github.com/themisterchong)). If this tool or what's in it helped your project, please credit Mr. Chong and link to this repository. Copying the code means keeping the copyright line from the MIT licence.
+
 ## License
 
-MIT
+MIT — Copyright (c) 2026 Mr. Chong (themisterchong). See [LICENSE](LICENSE).
